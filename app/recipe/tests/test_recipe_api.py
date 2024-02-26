@@ -11,7 +11,10 @@ from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APIClient
 
-from core.models import Recipe
+from core.models import (
+    Recipe,
+    Tag,
+)
 from recipe.serializers import (
     RecipeSerializer,
     RecipeDetailSerializer,
@@ -200,6 +203,173 @@ class PrivateRecipeApiTests(TestCase):
 
         self.assertEqual(res.status_code, status.HTTP_404_NOT_FOUND)
         self.assertTrue(Recipe.objects.filter(id=recipe.id).exists())
+
+
+    def test_create_recipe_with_new_tags(self):
+        """Test creating a recipe with new tags."""
+        # Define the payload for creating a recipe with tags
+        payload = {
+            'title': 'Thai Prawn Curry',
+            'time_minutes': 30,
+            'price': Decimal('2.50'),
+            'tags': [{'name': 'Thai'}, {'name': 'Dinner'}]  # List of tag names
+        }
+        # Send a POST request to create a new recipe with the specified payload
+        res = self.client.post(RECIPES_URL, payload, format='json')
+
+        # Assert that the response status code is 201 CREATED
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED)
+
+        # Query the database to retrieve recipes created by the user
+        recipes = Recipe.objects.filter(user=self.user)
+
+        # Assert that only one recipe is created
+        self.assertEqual(recipes.count(), 1)
+
+        # Get the created recipe from the queryset
+        recipe = recipes[0]
+
+        # Assert that the recipe has two tags associated with it
+        self.assertEqual(recipe.tags.count(), 2)
+
+        # Iterate through the tags in the payload
+        for tag in payload['tags']:
+            # Check if the tag exists for the recipe and is associated with the user
+            exists = recipe.tags.filter(
+                name=tag['name'],  # Check if the tag name matches
+                user=self.user,    # Check if the tag belongs to the user
+            ).exists()
+            # Assert that the tag exists for the recipe
+            self.assertTrue(exists)
+
+
+    def test_create_recipe_with_existing_tags(self):
+        """Test creating a recipe with existing tag."""
+
+        # Create a Tag object named 'Indian' associated with self.user
+        tag_indian = Tag.objects.create(user=self.user, name='Indian')
+
+        # Define payload with recipe details and existing tag names
+        payload = {
+            'title': 'Pongal',
+            'time_minutes': 60,
+            'price': Decimal('4.50'),
+            'tags': [{'name': 'Indian'}, {'name': 'Breakfast'}]  # List of tag names
+        }
+
+        # Send a POST request to RECIPES_URL with the payload
+        res = self.client.post(RECIPES_URL, payload, format='json')
+
+        # Assert that the response status code is HTTP 201 Created
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED)
+
+        # Query the recipes associated with self.user
+        recipes = Recipe.objects.filter(user=self.user)
+
+        # Assert that there is exactly one recipe associated with self.user
+        self.assertEqual(recipes.count(), 1)
+
+        # Get the first recipe from the queryset
+        recipe = recipes[0]
+
+        # Assert that the recipe has two tags associated with it
+        self.assertEqual(recipe.tags.count(), 2)
+
+        # Assert that tag_indian is one of the tags associated with the recipe
+        self.assertIn(tag_indian, recipe.tags.all())
+
+        for tag in payload['tags']:
+            # Check if the tag exists for the recipe and is associated with the user
+            exists = recipe.tags.filter(
+                name=tag['name'],  # Check if the tag name matches
+                user=self.user,    # Check if the tag belongs to the user
+            ).exists()
+            # Assert that the tag exists for the recipe
+            self.assertTrue(exists)
+
+
+    def test_create_tag_on_update(self):
+        """Test creating a tag when updating a recipe"""
+
+        # Create a recipe associated with self.user
+        recipe = create_recipe(user=self.user)
+
+        # Define payload to add a new tag 'Lunch' to the recipe
+        payload = {'tags': [{'name':'Lunch'}]}
+
+        # Get the URL for updating the recipe
+        url = detail_url(recipe.id)
+
+        # Send a PATCH request to update the recipe with the new tag
+        res = self.client.patch(url, payload, format='json')
+
+        # Assert that the response status code is 200 OK
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+
+        # Retrieve the newly created tag 'Lunch' associated with self.user
+        new_tag = Tag.objects.get(user=self.user, name='Lunch')
+
+        # Assert that the new tag is associated with the recipe
+        self.assertIn(new_tag, recipe.tags.all())
+
+
+    def test_update_recipe_assign_tag(self):
+        """Test assigning an existing tag when updating a recipe"""
+
+        # Create a 'Breakfast' tag associated with self.user
+        tag_breakfast = Tag.objects.create(user=self.user, name='Breakfast')
+
+        # Create a recipe associated with self.user and add 'Breakfast' tag to it
+        recipe = create_recipe(user=self.user)
+        recipe.tags.add(tag_breakfast)
+
+        # Create a 'Lunch' tag associated with self.user
+        tag_lunch = Tag.objects.create(user=self.user, name='Lunch')
+
+        # Define payload to assign 'Lunch' tag to the recipe
+        payload = {'tags': [{'name': 'Lunch'}]}
+
+        # Get the URL for updating the recipe
+        url = detail_url(recipe.id)
+
+        # Send a PATCH request to update the recipe with the 'Lunch' tag
+        res = self.client.patch(url, payload, format='json')
+
+        # Assert that the response status code is 200 OK
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+
+        # Assert that 'Lunch' tag is associated with the recipe
+        self.assertIn(tag_lunch, recipe.tags.all())
+
+        # Assert that 'Breakfast' tag is not associated with the recipe anymore
+        self.assertNotIn(tag_breakfast, recipe.tags.all())
+
+
+    def test_clear_recipe_tags(self):
+        """Test clearing a recipe's tags."""
+
+        # Create a 'Dessert' tag associated with self.user
+        tag = Tag.objects.create(user=self.user, name='Dessert')
+
+        # Create a recipe associated with self.user and add 'Dessert' tag to it
+        recipe = create_recipe(user=self.user)
+        recipe.tags.add(tag)
+
+        # Define payload to clear the tags of the recipe
+        payload = {'tags': []}
+
+        # Get the URL for updating the recipe
+        url = detail_url(recipe.id)
+
+        # Send a PATCH request to clear the tags of the recipe
+        res = self.client.patch(url, payload, format='json')
+
+        # Assert that the response status code is 200 OK
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+
+        # Assert that the recipe has no tags associated with it anymore
+        self.assertEqual(recipe.tags.count(), 0)
+
 
 
 
